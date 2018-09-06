@@ -1,0 +1,76 @@
+using RekenMachineAPI.Domain;
+using RekenMachineAPI.Service.Calculators;
+using RekenMachineAPI.Service.Operators;
+using System;
+using System.Threading.Tasks;
+
+namespace RekenMachineAPI.Service
+{
+    public interface ICalculatorService
+    {
+        Expression Calculate(string input);
+    }
+    public class CalculatorService : ICalculatorService
+    {
+        private Calculator _calculator;
+        private Operator _operator;
+        private readonly ICalculatorFactory _calculatorFactory;
+        private readonly IParseService _parseService;
+        private readonly IOperatorFactory _operatorFactory;
+        private readonly IService<Calculation> _calculationService;
+        private readonly IService<CalculationType> _calculationTypeService;
+        private readonly IDateTimeProvider _dateTimeProvider;
+
+
+        public CalculatorService(IParseService parseService, IOperatorFactory operatorFactory, ICalculatorFactory calculatorFactory, IService<Calculation> calculationService, IService<CalculationType> calculationTypeService, IDateTimeProvider dateTimeProvider)
+        {
+            _parseService = parseService;
+            _operatorFactory = operatorFactory;
+            _calculatorFactory = calculatorFactory;
+            _calculationService = calculationService;
+            _calculationTypeService = calculationTypeService;
+            _dateTimeProvider = dateTimeProvider;
+        }
+
+        public Expression Calculate(string input)
+        {
+            Expression expression = _parseService.Parse(input);
+            _calculator = _calculatorFactory.Resolve(expression);
+            expression.Val = _calculator.Calculate(expression);
+           
+            LogExpression(expression);
+            return expression;
+        }
+
+        private void LogExpression(Expression expression)
+        {
+            Calculation calculation = new Calculation
+            {
+                Created = _dateTimeProvider.Now
+            };
+            calculation.CalculationString = expression.ExpressionAsString;
+            calculation.Value = expression.Val;
+            calculation.CalculationType = DetermineCalculationType(expression);
+
+            _calculationService.Add(calculation);
+            _calculationService.SaveChangesAsync();
+//            Task.Run(async () => { await _calculationService.SaveChangesAsync(); });
+        }
+
+        private CalculationType DetermineCalculationType(Expression expression)
+        {
+            OperationType ops = 0;
+            StoreOperator2(expression, ref ops);
+            var calculationTypes = _calculationTypeService.GetEf();
+
+            _operator = _operatorFactory.Resolve(ops);
+            return _operator.GetCalculationType(calculationTypes);
+        }
+        private void StoreOperator2(Expression expression, ref OperationType ops)
+        {
+            if (expression.RightHand.Operation != 0)
+                StoreOperator2(expression.RightHand, ref ops);
+            ops |= expression.Operation;
+        }
+    }
+}
